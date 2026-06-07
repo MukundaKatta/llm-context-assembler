@@ -349,9 +349,21 @@ class ContextAssembler:
         for d in data.get("sources", []):
             src = ContextSource.from_dict(d)
             asm._sources[src.name] = src
-        asm._order = list(
-            data.get("order", [s["name"] for s in data.get("sources", [])])
-        )
+        # Rebuild _order so it always matches _sources exactly, regardless of
+        # any inconsistency in the serialised data.  Honour the recorded order
+        # for known names, drop dangling names, then append any sources that
+        # were missing from "order" (in their serialised order).
+        seen: set[str] = set()
+        order: list[str] = []
+        for name in data.get("order", []):
+            if name in asm._sources and name not in seen:
+                order.append(name)
+                seen.add(name)
+        for name in asm._sources:
+            if name not in seen:
+                order.append(name)
+                seen.add(name)
+        asm._order = order
         return asm
 
     def __repr__(self) -> str:

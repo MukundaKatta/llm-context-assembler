@@ -343,3 +343,74 @@ def test_repr():
     r = repr(asm)
     assert "ContextAssembler" in r
     assert "100" in r
+
+
+# ---------------------------------------------------------------------------
+# Default tokenizer
+# ---------------------------------------------------------------------------
+
+
+def test_default_tokenizer_chars_per_four():
+    # Default tokenizer is len(text) // 4.
+    asm = ContextAssembler(budget=1000)
+    src = asm.add_source("s1", "x" * 40)
+    assert src.estimated_tokens == 10
+
+
+def test_default_tokenizer_minimum_one():
+    # Even empty/short content costs at least one token.
+    asm = ContextAssembler(budget=1000)
+    assert asm.add_source("empty", "").estimated_tokens == 1
+    assert asm.add_source("short", "ab").estimated_tokens == 1
+
+
+# ---------------------------------------------------------------------------
+# from_dict robustness against inconsistent serialised data
+# ---------------------------------------------------------------------------
+
+
+def test_from_dict_drops_dangling_order_names():
+    # An "order" entry with no matching source must not corrupt the assembler.
+    data = {
+        "budget": 100,
+        "order": ["a", "ghost"],
+        "sources": [{"name": "a", "content": "aa"}],
+    }
+    asm = ContextAssembler.from_dict(data, tokenizer=_exact_tokens)
+    assert [s.name for s in asm.all()] == ["a"]
+    # assemble() must not raise on the dangling name.
+    assert [s.name for s in asm.assemble().included] == ["a"]
+
+
+def test_from_dict_appends_sources_missing_from_order():
+    # A source absent from "order" must still appear (in serialised order).
+    data = {
+        "budget": 100,
+        "order": ["a"],
+        "sources": [
+            {"name": "a", "content": "aa"},
+            {"name": "b", "content": "bb"},
+        ],
+    }
+    asm = ContextAssembler.from_dict(data, tokenizer=_exact_tokens)
+    assert len(asm) == 2
+    assert [s.name for s in asm.all()] == ["a", "b"]
+    assert {s.name for s in asm.assemble().included} == {"a", "b"}
+
+
+def test_from_dict_order_matches_sources_invariant():
+    # _order and _sources must always carry the same names.
+    data = {
+        "budget": 100,
+        "order": ["b", "missing", "a"],
+        "sources": [
+            {"name": "a", "content": "aa"},
+            {"name": "b", "content": "bb"},
+            {"name": "c", "content": "cc"},
+        ],
+    }
+    asm = ContextAssembler.from_dict(data, tokenizer=_exact_tokens)
+    names = [s.name for s in asm.all()]
+    # Known order honoured first (b, a), then leftover sources (c).
+    assert names == ["b", "a", "c"]
+    assert len(names) == len(asm)
